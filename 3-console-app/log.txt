@@ -1,0 +1,26 @@
+INSERT INTO TutorialAppSchema.Computer 
+            (
+                Motherboard, 
+                CPUCores,
+                HasWifi,
+                HasLTE,
+                ReleaseDate,
+                Price,
+                VideoCard
+            )
+            VALUES
+            ('Z690', '4', 'True', 'False', '2023-11-04 17:52:35.794', '1954.87', 'RTX3060')
+INSERT INTO TutorialAppSchema.Computer 
+            (
+                Motherboard, 
+                CPUCores,
+                HasWifi,
+                HasLTE,
+                ReleaseDate,
+                Price,
+                VideoCard
+            )
+            VALUES
+            ('Z690', '4', 'True', 'False', '2023-11-04 17:52:35.794', '1954.87', 'RTX3060')
+
+writing text to files is bananas
