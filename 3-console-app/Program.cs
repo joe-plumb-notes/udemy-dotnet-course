@@ -8,6 +8,7 @@ using MyApp.Models;
 using System.Text.Json;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
+using AutoMapper;
 
 namespace MyApp // Note: actual namespace depends on the project name.
 {
@@ -21,29 +22,45 @@ namespace MyApp // Note: actual namespace depends on the project name.
             
             DataContextDapper dapper = new DataContextDapper(config);
 
-            string computersJson = File.ReadAllText("Computers.json");
+            string computersJson = File.ReadAllText("ComputersSnake.json");
 
-            // System Serializer Options
-            JsonSerializerOptions options = new JsonSerializerOptions()
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
+            // Mapper mapper = new Mapper(new MapperConfiguration((cfg) => {
+            //     cfg.CreateMap<ComputerSnake, Computer>()
+            //         .ForMember(destination => destination.ComputerId, options => 
+            //             options.MapFrom(source => source.computer_id))
+            //         .ForMember(destination => destination.Motherboard, options => 
+            //             options.MapFrom(source => source.motherboard))
+            //         .ForMember(destination => destination.CPUCores, options => 
+            //             options.MapFrom(source => source.cpu_cores))
+            //         .ForMember(destination => destination.HasWiFi, options => 
+            //             options.MapFrom(source => source.has_wifi))
+            //         .ForMember(destination => destination.HasLTE, options => 
+            //             options.MapFrom(source => source.has_lte))
+            //         .ForMember(destination => destination.ReleaseDate, options => 
+            //             options.MapFrom(source => source.release_date))
+            //         .ForMember(destination => destination.Price, options => 
+            //             options.MapFrom(source => source.price))
+            //         .ForMember(destination => destination.VideoCard, options => 
+            //             options.MapFrom(source => source.video_card));      
+            // }));
 
-            // Newtonsoft Serializer settings
-            JsonSerializerSettings settings = new JsonSerializerSettings()
-            {
-                ContractResolver = new CamelCasePropertyNamesContractResolver()
-            };
+            IEnumerable<Computer>? computersSystem = System.Text.Json.JsonSerializer.Deserialize<IEnumerable<Computer>>(computersJson);
 
-            IEnumerable<Computer>? computersSystem = System.Text.Json.JsonSerializer.Deserialize<IEnumerable<Computer>>(computersJson, options);
-
-            IEnumerable<Computer>? computersNewtonsoft = JsonConvert.DeserializeObject<IEnumerable<Computer>>(computersJson);
+            // IEnumerable<Computer> computersResult = mapper.Map<IEnumerable<Computer>>(computersSystem);
         
             if (computersSystem != null)
             {
+                
                 foreach (Computer computer in computersSystem)
                 {
-                    string insertSql = @"INSERT INTO TutorialAppSchema.Computer 
+                    // Convert values for input to SQL table    
+                    string motherboard = computer.Motherboard != null ? $"'{EscapeSingleQuote(computer.Motherboard)}'" : "NULL";
+                    string videoCard = computer.VideoCard != null ? $"'{EscapeSingleQuote(computer.VideoCard)}'" : "NULL";
+                    string releaseDate = computer.ReleaseDate != null ? $"'{computer.ReleaseDate.Value.ToString("yyyy-MM-dd HH:mm:ss.fff")}'" : "NULL";
+                    int hasWiFi = computer.HasWiFi ? 1 : 0;
+                    int hasLTE = computer.HasLTE ? 1 : 0;
+
+                    string insertSql = $@"INSERT INTO TutorialAppSchema.Computer 
                     (
                         Motherboard, 
                         CPUCores,
@@ -54,16 +71,17 @@ namespace MyApp // Note: actual namespace depends on the project name.
                         VideoCard
                     )
                     VALUES
-                    ('" +
-                    EscapeSingleQuote(computer.Motherboard )+ "', '" +
-                    computer.CPUCores + "', '" +
-                    computer.HasWiFi + "', '" +
-                    computer.HasLTE + "', '" +
-                    computer.ReleaseDate?.ToString("yyyy-MM-dd HH:mm:ss.fff") + "', '" +
-                    computer.Price + "', '" +
-                    EscapeSingleQuote(computer.VideoCard)
-                    + "')";
-                    dapper.ExecuteSql(insertSql);
+                    (
+                        {motherboard}, 
+                        {computer.CPUCores}, 
+                        {hasWiFi}, 
+                        {hasLTE}, 
+                        {releaseDate}, 
+                        {computer.Price}, 
+                        {videoCard}
+                    )";
+
+                     dapper.ExecuteSql(insertSql);
                 }
             }
 
@@ -72,29 +90,7 @@ namespace MyApp // Note: actual namespace depends on the project name.
                 string output = input.Replace("'", "''");
             
                 return output;
-            };
-
-            // string computerscopySystem = System.Text.Json.JsonSerializer.Serialize(computersSystem, options);
-            // File.WriteAllText("computersCopySystem.txt", computerscopySystem);
-
-            // string computerscopyNewtonsoft = JsonConvert.SerializeObject(computersNewtonsoft, settings);
-            // File.WriteAllText("computersCopyNewtonsoft.txt", computerscopyNewtonsoft);
-            
-            
-            // Console.WriteLine(computers);
-
-            
-
-            // File.WriteAllText("log.txt", insertSql);
-
-            // using StreamWriter openFile = new("log.txt", append: true);
-
-            // openFile.WriteLine(insertSql);
-            // openFile.WriteLine("writing text to files is bananas");
-            // openFile.Close();
-
-            // Console.WriteLine(File.ReadAllText("log.txt"));
-        
+            };        
         }
     }
 }

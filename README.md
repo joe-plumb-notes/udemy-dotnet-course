@@ -527,11 +527,54 @@
     ```
 - Note the `EscapeSingleQuote` method - encountered an error where string values in `VideoCard` property has a quote - replace this with double apostrophe to resolve. There's got to be a better way to sanitize these string inputs!
 
+### Model mapping
 
-
-### Simple model mapping
-- Automapper
-    - Field Renaming
-
-- JSONAttributeName
+- Different use cases, but we're going to apply to the same. `Automapper` generally not for what we're going to use it for, but just to prove the point. Working with `ComputersSnake.json` file, which has properties in `snake_case`.
+- Add Automapper with `dotnet add package AutoMapper`
+    ```
+    Mapper mapper = new Mapper(new MapperConfiguration((cfg) => {
+                
+            }));
+    ```
+- Need a destination and source to map between. Want to line up with `Models/Computer.cs`, so, created a new Model, `ComputerSnake.cs` with the properties in the format in the inbound file. Then:
+    ```
+    Mapper mapper = new Mapper(new MapperConfiguration((cfg) => {
+                cfg.CreateMap<ComputerSnake, Computer>();
+            }));
+    ```
+- Need to add different mapping options - this on it's own will be looking to map names that are the same from one to the other - and the names are not the same!
+- We can do this based on `fields`, known as `members`.
+    ```
+        Mapper mapper = new Mapper(new MapperConfiguration((cfg) => {
+        cfg.CreateMap<ComputerSnake, Computer>()
+            .ForMember(destination => destination.ComputerId, options => 
+                options.MapFrom(source => source.computer_id))
+            .ForMember(destination => destination.Motherboard, options => 
+                options.MapFrom(source => source.motherboard))
+            .ForMember(destination => destination.CPUCores, options => 
+                options.MapFrom(source => source.cpu_cores))
+            .ForMember(destination => destination.HasWiFi, options => 
+                options.MapFrom(source => source.has_wifi))
+            .ForMember(destination => destination.HasLTE, options => 
+                options.MapFrom(source => source.has_lte))
+            .ForMember(destination => destination.ReleaseDate, options => 
+                options.MapFrom(source => source.release_date))
+            .ForMember(destination => destination.Price, options => 
+                options.MapFrom(source => source.price))
+            .ForMember(destination => destination.VideoCard, options => 
+                options.MapFrom(source => source.video_card));      
+    }));
+    ```
+- Can also convert value while mapping, which is good with this approach as you can embed logic in the conversion. It's also good when one of the models has fields the other one doesn't have.
+- We perform the mapping with `IEnumerable<Computer> computersResult = mapper.Map<IEnumerable<Computer>>(computersSystem);`
+- There's an easier way to do all of this - we can use the `JsonAttributeName` attribute on our original model to perform this mapping. Add the attribute directly above each of the properties on the model to enable the mapping directly from the consumed json into the `Computer` class.
+    ```
+    public class Computer
+        {
+            [JsonPropertyName("computer_id")]
+            public int ComputerId { get; set; }
+            [JsonPropertyName("motherboard")]
+            public string Motherboard { get; set; } = "";
+            ...
+    ```
 
