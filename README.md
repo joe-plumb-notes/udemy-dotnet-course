@@ -1,3 +1,7 @@
+# API Development with C# .NET Core 8 and MS SQL Server
+
+My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql-beginner-to-expert/
+
 ## C# Basics - Beginner
 
 - Create a new console app with `dotnet new console`
@@ -578,3 +582,58 @@
             ...
     ```
 
+## API basics
+
+- `startup.cs` was 'old' way of doing it in .net 6, so may come across this in legacy projects.
+- `dotnet new webapi -n DotnetAPI` to create a new webapi project
+- Focus on `Program.cs` for now.
+    - `builder` creates the web server that runs, which listens for and responds to requests. 
+    - `builder.Services.AddEndpointsApiExplorer();` maps the endpoints to make the routes available.
+    - `builder.Services.AddSwaggerGen();` to add Swagger, which is made available when running in development environment:
+        ```
+        if (app.Environment.IsDevelopment())
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI();
+        }
+        ```
+    - _They've updated the course to dotnet 8 here, and their boilerplate code is different._ The new sample you get when running `dotnet new webapi -n DotnetAPI` implements *Minimal APIs*, which was introduced in dotnet 6(!). It offers a simplified way to build APIs, especially for smaller applications or microservices.
+        - The new example has 1 file, rather that `/Controllers`, which is probably good for small projects and examples but may not scale well. It's got some new functionality too, like: 
+            ```
+            app.MapGet("/endpoint" () => 
+            {
+                ...
+            })
+            ```
+        - Still going to want to use controller infrastrucure in most situations
+        - Seems to have also introduced `records` which are similar to classes. Implements properties as arguments. [More Here](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/record).
+    - They suggest putting `app.UseHttpsRedirection();` in a conditional statement after the `if (app.Environment.IsDevelopment())` logic - not great. Instead, we can run `dotnet dev-certs https --trust` to trust the development https cert, and launch the app with `dotnet run --launch-profile https` [more here](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-7.0&tabs=visual-studio-code#test-the-project). We can then access the swagger OpenAPI spec at `swagger/index.html`, and call the api at `/WeatherForecast`.
+    - Interestingly, no logs or command line output when we hit the API.
+- When you get to developing front end with these APIs, enforcing HTTPS can make it more complex to develop. CORS = Cropss Origin Resource Sharing - origin for us being the URL that our API lives at. Front end would live at a different URL, so CORS error would be returned if you did not have a policy. Enter, `builder.Services.AddCors()`
+    ```
+    builder.Services.AddCors((options) => 
+    {
+        options.AddPolicy("DevCors", (corsBuilder) =>
+            {
+                corsBuilder.WithOrigins("http://localhost:4200", "http://localhost:3000", "http://localhost:8000")
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials();
+            });
+    ```
+
+### Controllers
+- Way to handle requests, and do things (go to database, transform data, etc).
+- The default route will match the name of the controller (i.e. `WeatherForecastController` listens on `weatherforecast`). Not case sensitive.
+- `[ApiController]` attribute marks the class as a controller that respondes to web API requests, and enables some default functionality and behaviours like model validation and automatic HTTP 400 responses.
+- `[Route("[controller]")]` attribute is used to define the route - the `[controller]` placeholder gets replaced by the name of the controller - this is where the controller name gets mapped to the route.
+- `ControllerBase` has properties and methods for handling HTTP requests. Base class for all controllers in an ASP.NET core app. Enables different action results e.g. `Ok()`, `NotFound()`, `BadRequest()`, support for model binding, which is a process that maps data from HTTP requests to action method parameters, and properties for accessing services that are registered in the dependency injection container, such as `HttpContext`, `User`, `Url`.
+
+
+
+### URL params
+
+### Database connection
+
+### Dapper and Entity Framework 
+- 
