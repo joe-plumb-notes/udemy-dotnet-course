@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "2-console-app", "2-console-
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "3-console-app", "3-console-app\3-console-app.csproj", "{2B790D83-1551-43BF-9BC2-6EDB67C48943}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetAPI", "DotnetAPI\DotnetAPI.csproj", "{B10B9388-AE9D-4051-A511-D79AFA7DC87D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,6 +31,10 @@ Global
 		{2B790D83-1551-43BF-9BC2-6EDB67C48943}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2B790D83-1551-43BF-9BC2-6EDB67C48943}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2B790D83-1551-43BF-9BC2-6EDB67C48943}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B10B9388-AE9D-4051-A511-D79AFA7DC87D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B10B9388-AE9D-4051-A511-D79AFA7DC87D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B10B9388-AE9D-4051-A511-D79AFA7DC87D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B10B9388-AE9D-4051-A511-D79AFA7DC87D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

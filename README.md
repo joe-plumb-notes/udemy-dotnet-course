@@ -30,7 +30,6 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
 - Assigning a value to an index greater than the number of items in the array results in `System.IndexOutOfRangeException: Index was outside the bounds of the array.`
 - You can declare values in the array along with the variable definition `string[] mySecondStringArray = {"banana", "eggs"};`
 
-
 #### Lists
 - More dynamic in length - additional memory will be assigned as it's needed.
 - Generic type. Declare like `List<string> myNewList = new List<string>();`. Parenthesis because we are calling the constructor of the class to create a new instance of a List class. Can pass any type in to the list.
@@ -609,7 +608,7 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
         - Seems to have also introduced `records` which are similar to classes. Implements properties as arguments. [More Here](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/record).
     - They suggest putting `app.UseHttpsRedirection();` in a conditional statement after the `if (app.Environment.IsDevelopment())` logic - not great. Instead, we can run `dotnet dev-certs https --trust` to trust the development https cert, and launch the app with `dotnet run --launch-profile https` [more here](https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-7.0&tabs=visual-studio-code#test-the-project). We can then access the swagger OpenAPI spec at `swagger/index.html`, and call the api at `/WeatherForecast`.
     - Interestingly, no logs or command line output when we hit the API.
-- When you get to developing front end with these APIs, enforcing HTTPS can make it more complex to develop. CORS = Cropss Origin Resource Sharing - origin for us being the URL that our API lives at. Front end would live at a different URL, so CORS error would be returned if you did not have a policy. Enter, `builder.Services.AddCors()`
+- When you get to developing front end with these APIs, enforcing HTTPS can make it more complex to develop. CORS = Cross Origin Resource Sharing - origin for us being the URL that our API lives at. Front end would live at a different URL, so CORS error would be returned if you did not have a policy. Enter, `builder.Services.AddCors()`
     ```
     builder.Services.AddCors((options) => 
     {
@@ -629,11 +628,242 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
 - `[Route("[controller]")]` attribute is used to define the route - the `[controller]` placeholder gets replaced by the name of the controller - this is where the controller name gets mapped to the route.
 - `ControllerBase` has properties and methods for handling HTTP requests. Base class for all controllers in an ASP.NET core app. Enables different action results e.g. `Ok()`, `NotFound()`, `BadRequest()`, support for model binding, which is a process that maps data from HTTP requests to action method parameters, and properties for accessing services that are registered in the dependency injection container, such as `HttpContext`, `User`, `Url`.
 
-
-
-### URL params
-
 ### Database connection
 
-### Dapper and Entity Framework 
-- 
+- Working with `appsettings.json` as always
+    - Adding `ConnectionStrings` to the file is then retrievable (dotnet 6 and above) simply by instanciating an `IConfiguration` object and calling `config.GetConnectionString("DefaultConnection")`.
+    - If in `startup.cs`, will need to code the parsing of the appsettings file to get the connection string. 
+- Added `dapper`, `Microsoft.Data.SqlClient` and `automapper` packages to the solution.
+- Created a new (the same as previous) [`Data/DataContextDapper.cs`](DotnetAPI\Data\DataContextDapper.cs) file, with methods to execute multi-line and single SQL commands. 
+- Then, created a new instance of the `DataContextDapper` object and use it in a new endpoint on the `User` controller, to execute a SQL command to `GETDATE()`.
+    ```
+    DataContextDapper _dapper;
+    public UserController(ILogger<UserController> logger, IConfiguration config)
+    {
+        _logger = logger;
+        _dapper = new DataContextDapper(config);
+    }
+
+    [HttpGet("TestConnection")]
+    public DateTime TestConnection()
+    {
+        return _dapper.LoadDataSingle<DateTime>("SELECT GETDATE()");
+    }
+    ```
+- It works!
+
+### Getting data into the application from SQL
+
+- Got some SQL queries against the sample database, going to build some models to map the data from the query response into the app. Two steps .. 
+
+#### Build the objects to recieve the results
+
+- `public partial class` enables you to add to the class from inside another file. Good to be partial, in case you need to add to them on the fly.
+- To deal with the `this property is non-nullable` error, we could add a constructor to the class. Basically conditional logic that inserts default values if we see `null` values for a given `User`. Even better, we can provide default values along with the class properties.
+- Building the models was straight forward - just mapped the datatypes from the database to datatypes in the model. `BIT` == `bool`, `NVARCHAR` == `string`, `DATETIME2` == `DateTime`.
+
+#### Build the controllers
+
+- We made a mistake in the last session - POCOs should have singular names, as you can't have one `Users`.
+- After we were given the API endpoints that we were going to create I had a crack at implementing this myself. Tried to get both bits of functionality in the same endpoint (he had `GetUser` and `GetAllUsers` which is bad design)
+    ```
+    [HttpGet("Users/{userId?}")]
+    public ActionResult<IEnumerable<User>> GetUsers(int? userId = null)
+    {
+        if (userId == null)
+        {
+            _logger.LogInformation("Users endpoint processed a request at " + DateTime.Now + ".");
+
+            string query = @"SELECT  [UserId]
+                            , [FirstName]
+                            , [LastName]
+                            , [Email]
+                            , [Gender]
+                            , [Active]
+                            FROM TutorialAppSchema.Users";
+
+            return Ok(_dapper.LoadData<User>(query));
+        }
+
+        else
+        {
+            _logger.LogInformation("C# User endpoint processed a request at " + DateTime.Now + ".");
+
+            string query = @"SELECT  [UserId]
+                            , [FirstName]
+                            , [LastName]
+                            , [Email]
+                            , [Gender]
+                            , [Active]
+                            FROM TutorialAppSchema.Users 
+                            WHERE [UserId] = " + userId + ";";
+
+            var user = _dapper.LoadDataSingle<User>(query);
+            if (user == null)
+            {
+                return NotFound();
+            }
+            return Ok(new List<User> { user });
+        }
+    }
+    ```
+- This is ok, and works fine with postman, but Swagger UI shows `userId` as a required parameter. Could be because this is a route parameter, and perhaps this would be eliminated if it were a query param?
+- One thing he did was cast the inbound int to a string with `userId.ToString()`.
+
+### Adding and Editing records
+- Add with `POST`, edit with `PUT`.
+- Writing a new method with `[HttpPut]` attribute, returning `IActionResult`, which returns a response that tells you what happened without necessarily returning data. Just returning HTTP response code, with potentially an error message.
+    ```
+    [HttpPut]
+    public IActionResult EditUser()
+    {
+        return Ok();
+    }
+    ```
+- The `Ok()` is a built-in method which we **inherit** from the ControllerBase class.
+- Written the SQL first, to map the change we want to make into a valid query with appropriate gaps for data to be passed through from the application.
+- We can take a model as the parameter e.g. `public IActionResult EditUser(User user)`, or we can parse from the body of the request e.g. `public IActionResult EditUser([FromBody])`, We're going to set the parameter to be an instance of our `User` class, and map the results into the SQL query from there.
+- Good idea to log the composed SQL line to check what this looks like while developing. Issue was `False` being passed through needed to be passed as a string. 
+
+### DTOs (Data Transfer Objects)
+- Going to do this with the `POST` endpoint. Resolving the situation where, when passing in a model as a parameter, it assumes you are going to pass in every parameter of the model (e.g. we don't know what the `UserId` is when creating a new `User`, as this is handled by the DB).
+- New folder `Dtos`, make a copy of the `User.cs`, but rename the object and file to `UserDto`, and remove the `UserId` property. Then, update the `POST` request to instead take the `UserDto` model as the input parameter.
+- **NB: hot reload can mess up and give funky error messages when making changes like this. Stop and restart if getting odd errors!**
+- Add a more specific name when creating the DTO - e.g. `UserToAddDto`
+
+### Namespaces
+- So far, we've been tying everything together in the same namespace, except from Controllers - it's at a sub namespace `DotnetAPI.Controllers`. Everything else has been at the `DotNetAPI` namespace, so as soon as the app starts, all of the models are loaded into memory. 
+- To remedy, we can create sub namespaces for each folder e.g. `DotnetAPI.Models`, `DotnetAPI.Dtos`, `DotnetAPI.Data` etc.
+- Can go more granular than this too when needed e.g. `DotnetAPI.UserModels`. Really depends on the size of the application. 
+
+### DELETE endpoint
+- Pretty straight forward, creating a new method with `[HttpDelete]` attribute:
+    ```
+    [HttpDelete("{userId}")]
+    public IActionResult DeleteUser(int userId)
+    {
+        string query = @"
+            DELETE FROM TutorialAppSchema.Users 
+                WHERE [UserId] = " + userId + ";";
+         _logger.LogInformation("SQL to be executed on DB: "+ query);
+        if (_dapper.ExecuteSql(query))
+        {
+            return Ok();
+        }
+        else
+        {
+            return NotFound();
+            throw new Exception("Failed to delete user with Id: "+ userId);
+        }
+    }
+    ```
+
+### Entity Framework and Repository Pattern
+- Add package `dotnet add package Microsoft.EntityFrameworkCore`
+- Set up `DataContextEF`, inheriting from DbContext, and having a private field to store secrets like connection string, which is passed into the constructor when instanciating the class:
+    ```
+    public class DataContextEF : DbContext
+    {
+        private readonly IConfiguration _config;
+
+        public DataContextEF(IConfiguration config)
+        {
+            _config = config; 
+        }
+    }
+    ```
+- `DbSet` is used to map the table back to the model. `public virtual DbSet<User> Users { get; set; }`
+- EF will default to look in `dbo` schema. Our objects are in a different schema. Configure EF to use a different schema with `modelBuilder.HasDefaultSchema("TutorialAppSchema");`
+- We also need to add in some config to tell EF where to find our tables related to our objects, and provide key information too:
+    ```
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.HasDefaultSchema("TutorialAppSchema");
+
+        modelBuilder.Entity<User>() // Call Entity
+            .ToTable("Users", "TutorialAppSchema") // Set the table and schema details
+            .HasKey(u => u.UserId); // Provide the key 
+        
+        modelBuilder.Entity<UserJobInfo>() 
+            .HasKey(u => u.UserId); // Provide the key
+
+        modelBuilder.Entity<UserSalary>() 
+            .HasKey(u => u.UserId); // Provide the key
+    }
+    ```
+- Finally, we need to override the `OnConfiguring` method inherited from the DbContext class, to pass in the connection string from our `config` field. This requires `dotnet add package Microsoft.EntityFrameworkCore.SqlServer` to be added.
+    ```
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder
+                .UseSqlServer(_config.GetConnectionString("DefaultConnection"),
+                    optionsBuilder => optionsBuilder.EnableRetryOnFailure());
+        }
+    }
+    ```
+- Duplicated the `UserController.cs` as `UserEFController.cs`, going to use this to implement the same functionality as we did in Dapper, with EF.
+- It's a lot less code to work with EF entites to retrieve them from the db... mainly because you don't have to write the SQL. His argument against EF is that EF is slower, and if we want to change the functionality, it's more work to get something working with EF compared to writing the SQL query. Apparently easier to join data and change/update multiple entites at the same time with Dapper too. If CRUD, EF is a good choice in his opinion... needs more research.
+    ```
+    [HttpGet]
+    public ActionResult<IEnumerable<User>> GetUsers(int? userId = null)
+    {
+        if (userId == null)
+        {
+            _logger.LogInformation("Users endpoint processed a request at " + DateTime.Now + ". Getting all users from the db..");
+
+            IEnumerable<User> users = _entityFramework.Users.ToList<User>();
+            return Ok(users);
+        }
+
+        else
+        {
+            _logger.LogInformation("User endpoint processed a request at " + DateTime.Now + ". User Id " + userId + " was passed. Getting User Details from db..");
+
+            var user = _entityFramework.Users.Find(userId);
+            if (user == null)
+            {
+                return NotFound();
+            }
+            return Ok(new List<User> { user });
+        }
+    }
+    ```
+- To get a user, you can also use `.Where()` - `User? userDb = _entityFramework.Users.Where(u => u.UserID == userId).FirstOrDefault<User>();`. `Find` only works on primary key columns, and checks the cache before going to the DB.
+- To add an entity, use `_entityFramework.Users.Add()`. To commit the changes, you need to call `SaveChanges()`:
+    ```
+    if (_entityFramework.SaveChanges() > 0)
+        {
+            return Ok();
+        }
+    ```
+- When updating or deleting, need to get the user object from the db first, then ether update with the new values and call `Add()` then `SaveChanges()`, or call `_entityFramework.Users.Remove(user)`.
+
+### Automapper
+- Simplifying the `POST` using automapper.
+- To add the mapper:
+    - Add a new mapper field `IMapper _mapper;`
+    - Add the mapper to the constructor
+        ```
+        _mapper = new Mapper(new MapperConfiguration(cfg =>{
+            cfg.CreateMap<UserDto, User>();
+        }));
+        ```
+- Then, in the method:
+    ```
+    User userDb = new User
+        {
+            Active = user.Active,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Email = user.Email,
+            Gender = user.Gender
+        };
+    ```
+    becomes `User userDb = _mapper.Map<User>(user);`
+
+### Task - implement some more APIs for UserSalary and/or UserJobInfo
+
+- I implemented GET, POST, PUT, and DELETE APIs for UserSalary, using both EF and Dapper. 
+- Both approaches are good really. EF is fast to implement and saves you having to this across both C# and SQL domains so much, as EF is handling the query generation. However I can imagine in complex scenarios, being able to embed your own SQL and map this manually to your C# objects could be more efficient. I want to learn more about the complexities of setting up EF on projects e.g. using the `DbContextOptionsBuilder` used in `OnConfiguring` and `ModelBuilder` in `OnModelCreating` - feels like we skimmed over the complexity here, and because the data model was straight forward, consuming this in EF was easy. 
