@@ -866,4 +866,94 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
 ### Task - implement some more APIs for UserSalary and/or UserJobInfo
 
 - I implemented GET, POST, PUT, and DELETE APIs for UserSalary, using both EF and Dapper. 
-- Both approaches are good really. EF is fast to implement and saves you having to this across both C# and SQL domains so much, as EF is handling the query generation. However I can imagine in complex scenarios, being able to embed your own SQL and map this manually to your C# objects could be more efficient. I want to learn more about the complexities of setting up EF on projects e.g. using the `DbContextOptionsBuilder` used in `OnConfiguring` and `ModelBuilder` in `OnModelCreating` - feels like we skimmed over the complexity here, and because the data model was straight forward, consuming this in EF was easy. 
+- Both approaches are good really. EF is fast to implement and saves you having to this across both C# and SQL domains so much, as EF is handling the query generation. However I can imagine in complex scenarios, being able to embed your own SQL and map this manually to your C# objects could be more efficient. I want to learn more about the complexities of setting up EF on projects e.g. using the `DbContextOptionsBuilder` used in `OnConfiguring` and `ModelBuilder` in `OnModelCreating` - feels like we skimmed over the complexity here, and because the data model was straight forward, consuming this in EF was easy.
+- When using EF, use mappers when updating objects to compare inbound data to existing data and merge. 
+
+## API Intermediate
+
+- Repository flow - more common with EF projects. 
+- Abstract the database access layer away from the user by another level. Anything we do with EF will be done from within the repository. Any time we create a new controller that uses EF, we would create a new repository for that controller too.
+- Start by creating a `UserRepository.cs` in the `Data` folder, add it to the namespace, then create a `UserRepository` class where we will access EF and migrate all our EF logic to.
+- Going to start by migrating all the `Add` patterns, i.e. all the `POST` requests. 
+- Need our constructor from the controller, so we can inject EF into our repository.
+    ```
+    namespace DotnetAPI.Data
+    {
+        public class UserRepository
+        {
+            private readonly ILogger<UserRepository> _logger;
+
+            DataContextEF _entityFramework;
+            public UserRepository(ILogger<UserRepository> logger, IConfiguration config)
+            {
+                _logger = logger;
+                _entityFramework = new DataContextEF(config);
+            }
+        }
+    }
+    ```
+- We remove the mapper too - we can leave that in the controller.
+- Adding a generic `SaveChanges()` method that uses the EF Data Context to commit changes to the db:
+    ```
+    public bool SaveChanges()
+    {
+        return _entityFramework.SaveChanges() > 0;
+    }
+    ```
+- And adding a generic `AddEntity` method, with a generic Type T so we can add any model type using the method:
+    ```
+    public void AddEntity<T>(T entityToAdd)
+    {
+        if (entityToAdd != null)
+        {
+            _entityFramework.Add(entityToAdd);
+        }
+    }
+    ```
+- So far, with the deletes, we've been deleting a specific instance of an entity by fetching it from the db to validate it exists, then calling `Remove` against the entity e.g. `_entityFramework.UserSalary.Remove(userSalaryDb);`, passing in the object. But we don't have to do this - we can just call `Remove`:
+    ```
+    public void RemoveEntity<T>(T entityToRemove)
+    {
+        if (entityToRemove != null)
+        {
+            _entityFramework.Remove(entityToRemove);
+        }
+    }
+    ```
+- Seems that we cannot implement generics for `GET` and `POST` without some more infrastrucutre.. we're going to implement an interface.
+
+### Interfaces
+- We're going to use the interface to connect the Repository to the controller. New file in the `Data` folder, `IUserRepository.cs`, add the interface to the namespace, and add method signatures for the methods that any consuming class must implement. [Good video that explains interfaces in more detail here](https://www.youtube.com/watch?v=A7qwuFnyIpM). We'll then be able to access the methods by creating an instance of the interface, rather than of the class.
+- One more step - update `Program.cs` and add a new `builder.Services` call to add a `Scoped` connection between our UserRepositry interface and class. `builder.Services.AddScoped<IUserRepository, UserRepository>();`
+- With the above, we can now implement the method signatures declared in the `IUserRepository` interface in the `UserRepository` controller. In the controller, add a new field for the repository `IUserRepository _userRepository;`, and then add this to the constructor:
+    ```
+    public UserEFController(ILogger<UserEFController> logger,        IConfiguration config, **IUserRepository userRepository**)
+    {
+        _logger = logger;
+        _entityFramework = new DataContextEF(config);
+        **_userRepository = userRepository;**
+    ...
+    ```
+- We can now access the methods implemented in the `UserRepository` class via the `_userRepository` interface, e.g. `_entityFramework.Users.Remove(userDb);` becomes `_userRepository.RemoveEntity(userDb);`
+- Moving the `GET` and `PUT` requests
+    - My code is different to his - I have some `AspNetCore.Mvc.ControllerBase` calls for HTTP status codes and such. The solution is to remove these from the `UserRepository` class, and implement this logic in the controller. 
+    - I had some conditional logic that I was using to override behavior based on whether or not parameters were passed - I can still have this, but this logic lives in the controller, and I have separate methods for each of those operations in the repository, e.g.
+        ```
+        public IEnumerable<User> GetAllUsers()
+        {
+            _logger.LogInformation("Users endpoint processed a request at " + DateTime.Now + ". Getting all users from the db..");
+            return _entityFramework.Users.ToList();
+        }
+        
+        public User GetUserById(int userId)
+        {
+            _logger.LogInformation("User endpoint processed a request at " + DateTime.Now + ". User Id " + userId + " was passed. Getting User Details from db..");
+            return _entityFramework.Users.Find(userId);
+        }
+        ```
+- The flow is, get the EF calls out of the controller and into the Repository (i.e. `UserRepository.cs`), add the method signature to the interface (`IUserRepository.cs`), then refactor the original code in the controller to use the repository instead. 
+
+- Authentication
+    - UserId embedding in the token
+- Refactoring code
+- Relating data to the user (e.g. user and posts)
