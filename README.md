@@ -923,7 +923,7 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
 - Seems that we cannot implement generics for `GET` and `POST` without some more infrastrucutre.. we're going to implement an interface.
 
 ### Interfaces
-- We're going to use the interface to connect the Repository to the controller. New file in the `Data` folder, `IUserRepository.cs`, add the interface to the namespace, and add method signatures for the methods that any consuming class must implement. [Good video that explains interfaces in more detail here](https://www.youtube.com/watch?v=A7qwuFnyIpM). We'll then be able to access the methods by creating an instance of the interface, rather than of the class.
+- We're going to use the interface to connect the Repository to the controller. New file in the `Data` folder, `IUserRepository.cs`, add the interface to the namespace, and add method signatures for the methods that any consuming class must implement. [Good video that explains interfaces as contracts + more detail here](https://www.youtube.com/watch?v=A7qwuFnyIpM). We'll then be able to access the methods by creating an instance of the interface, rather than of the class.
 - One more step - update `Program.cs` and add a new `builder.Services` call to add a `Scoped` connection between our UserRepositry interface and class. `builder.Services.AddScoped<IUserRepository, UserRepository>();`
 - With the above, we can now implement the method signatures declared in the `IUserRepository` interface in the `UserRepository` controller. In the controller, add a new field for the repository `IUserRepository _userRepository;`, and then add this to the constructor:
     ```
@@ -953,7 +953,196 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
         ```
 - The flow is, get the EF calls out of the controller and into the Repository (i.e. `UserRepository.cs`), add the method signature to the interface (`IUserRepository.cs`), then refactor the original code in the controller to use the repository instead. 
 
-- Authentication
+### Authentication
+- He's creating a user table to store email addresses, passwords hashes, and salts. 
+    ```
+    CREATE TABLE TutorialAppSchema.Auth (
+        Email NVARCHAR(200),
+        PasswordHash VARBINARY(MAX),
+        PasswordSalt VARBINARY(MAX)
+    )
+    ```
+- Going to create a controller to work with with this table.
+- First, adding a section in `appsettings.json` called `AppSettings`, and adding a `PasswordKey` with a random string that we'll use along with the salt to hash the password.
+- Adding some different DTO models:
+    - [Login](.\DotnetAPI\Dtos\UserForLoginDto.cs)
+    - [Login Confirmation](.\DotnetAPI\Dtos\UserForLoginConfirmationDto.cs)
+        - Got `byte[]` datatype (byte arrays) for the `PasswordHash` and `PasswordSalt` values - equivalent to `VARBINARY` in the db.
+    - [Registration](.\DotnetAPI\Dtos\UserForRegistrationDto.cs)
+- Now adding an `AuthController.cs` 
+    ```
+    namespace DotnetAPI.Controllers
+    {
+        public class AuthController : ControllerBase
+        {
+            private readonly DataContextDapper _dapper;
+            private readonly IConfiguration _config;
+            public AuthController(IConfiguration config)
+            {
+                _dapper = new DataContextDapper(config);
+                _config = config;
+            }
+    ...
+    ```
+    - Fields for `DataContextDapper` and `IConfiguration` that we pass into the constructor, as we did with the `UserController`
+- Then creating two endpoints
+    ```
+    // Register user
+    [HttpPost("register")]
+    public IActionResult Register(UserForRegistrationDto userForRegistration)
+    {
+        return Ok();
+    }
+
+    // Login
+    [HttpPost("login")]
+    public IActionResult Login(UserForLoginDto userForLogin)
+    {
+        return Ok();
+    }
+    ```
+    - Got an error trying to access these Dto models as they were not `public`. Same thing with the fields too. Need to make those public to be able to access them.
+- Now implementing the Registration logic. 
+    ```
+    public IActionResult Register(UserForRegistrationDto userForRegistration)
+        {
+            if (userForRegistration.Password == userForRegistration.PasswordConfirm)
+            {
+                // Check if user exists
+                string query = $@"SELECT [Email]
+                        FROM TutorialAppSchema.Auth 
+                        WHERE [Email] = '{ userForRegistration.Email }'";
+                IEnumerable<string> existingUsers = _dapper.LoadData<string>(query);
+                if (existingUsers.Count() == 0)
+                {
+                    byte[] passwordSalt = new byte[128/8]; // 128 bits (i.e. 16 bytes) in the byte array
+                    using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+                    {
+                        rng.GetNonZeroBytes(passwordSalt); // Generating a random byte array with System.Security.Cryptography to salt the password
+                    }
+                    string passwordSaltPlusString = _config.GetSection("AppSettings:PasswordKey").Value 
+                            + Convert.ToBase64String(passwordSalt); // Adding our known secret from the App Config settings
+
+                    byte[] passwordHash = KeyDerivation.Pbkdf2(
+                        password: userForRegistration.Password, 
+                        salt: Encoding.ASCII.GetBytes(passwordSaltPlusString),
+                        prf: KeyDerivationPrf.HMACSHA256, // pseudo-random function
+                        iterationCount: 100000,
+                        numBytesRequested: 256/8)
+                        ;
+                    
+                    // SQL query with parameters for the hash and salt
+                    string sqlAddAuth = $@"INSERT INTO TutorialAppSchema.Auth
+                    ([Email],
+                    [PasswordHash],
+                    [PasswordSalt]) VALUES
+                    ('{ userForRegistration.Password }', @PasswordHash, @PasswordSalt);";
+
+                    // Create list of SQL parameters to pass in with query
+                    List<SqlParameter> sqlParameters = new List<SqlParameter>();
+                    SqlParameter passwordHashParameter = new SqlParameter("@PasswordHash", SqlDbType.VarBinary)
+                    {
+                        Value = passwordHash // User the constructor to pass in the value
+                    };
+                    SqlParameter passwordSaltParameter = new SqlParameter("@PasswordSalt", SqlDbType.VarBinary)
+                    {
+                        Value = passwordSaltPlusString
+                    };
+                    // sqlParameters.Add(passwordHashParameter);
+                    // sqlParameters.Add(passwordSaltParameter);
+                    sqlParameters.AddRange(new[] { passwordHashParameter, passwordSaltParameter });
+
+                    if (_dapper.ExecuteSqlWithParameters(sqlAddAuth, sqlParameters))
+                    {
+                        return Ok();
+                    }
+                    throw new Exception ("Failed to register user");
+                } 
+                throw new Exception ("User with this Email already exists");
+            }
+            throw new Exception("Passwords do not match");
+        }
+    ```
+- Now implementing the `login` functionality to test the password hash and password salt to make sure the password can be verified. 
+- Take the e-mail and get the password hash and salt from the database, add the App Setting to the salt, and then compare the values
+    ```
+            // Login
+        [HttpPost("login")]
+        public IActionResult Login(UserForLoginDto userForLogin)
+        {
+           // Get passwordhash and passwordsalt from db
+           string sqlForHashAndSalt = $@"SELECT [PasswordHash], [PasswordSalt]
+                FROM TutorialAppSchema.Auth
+                WHERE [Email] == '{ userForLogin.Email }'";
+            
+            UserForLoginConfirmationDto userForLoginConfirmation = _dapper
+                .LoadDataSingle<UserForLoginConfirmationDto>(sqlForHashAndSalt);
+           
+            byte[] passwordHash = GetPasswordHash(userForLogin.Password, userForLoginConfirmation.PasswordSalt);
+
+            for (int index = 0; index < passwordHash.Length; index++)
+            {
+                if (passwordHash[index] != userForLoginConfirmation.PasswordHash[index])
+                {
+                    return StatusCode(401, "Incorrect password");
+                }
+            }
+            return Ok();
+        }
+    ```
+- // if (passwordHash == userForLoginConfirmation.PasswordHash) 
+    - Won't work - can't compare byte arrays like this, because arrays are reference types, and the `==` operator compares the references, not the contents of the arrays. If you use `==`, it will return `true` only if both arrays are the exact same instance (i.e., they both point to the same location in memory).
+- We also moved the code to hash a password into a `private` method `GetPasswordHash` so we can re-use it across login and registation
+    ```
+    private byte[] GetPasswordHash(string password, byte[] passwordSalt)
+        {
+            // Generate passwordsalt with AppSetting and database stored salt
+            string passwordSaltPlusString = _config.GetSection("AppSettings:PasswordKey").Value 
+                            + Convert.ToBase64String(passwordSalt);
+
+            // hash the password
+            return KeyDerivation.Pbkdf2(
+                        password: password, 
+                        salt: Encoding.ASCII.GetBytes(passwordSaltPlusString),
+                        prf: KeyDerivationPrf.HMACSHA256,
+                        iterationCount: 100000,
+                        numBytesRequested: 256/8);
+        }
+    ```
+- Enforcing HTTPS means credentials are encrypted, and we can use HTTP Basic Auth (encode u:p in base64, and POST in the Authentication header of the request)
+
+### Adding users to our users table on registration
+- We edited the [Registration Dto](.\DotnetAPI\Dtos\UserForRegistrationDto.cs) to add in name and gender fields, then added a SQL query to write these details to the user table on user registration:
+    ```
+    if (_dapper.ExecuteSqlWithParameters(sqlAddAuth, sqlParameters))
+    {
+        string sqlAddUserFromRegistration = @"
+            INSERT INTO TutorialAppSchema.Users (
+                    [FirstName]
+                    , [LastName]
+                    , [Email]
+                    , [Gender]
+                    , [Active])
+                VALUES
+                    (
+                        '" + userForRegistration.FirstName + @"',
+                        '" + userForRegistration.LastName + @"',
+                        '" + userForRegistration.Email + @"',
+                        '" + userForRegistration.Gender + @"',
+                        1
+                    )  
+                    ;";
+        if (_dapper.ExecuteSql(sqlAddUserFromRegistration))
+        {
+            return Ok();
+        }
+        throw new Exception ("Failed to add user");
+    ```
+- We ideally would need to wrap these writes in a transaction to rollback the registration query if the user write fails for some reason.
+
+### JWT
+- 
+
     - UserId embedding in the token
 - Refactoring code
 - Relating data to the user (e.g. user and posts)
