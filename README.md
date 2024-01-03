@@ -1141,8 +1141,82 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
 - We ideally would need to wrap these writes in a transaction to rollback the registration query if the user write fails for some reason.
 
 ### JWT
-- 
 
-    - UserId embedding in the token
+#### Creating JWT
+
+- Going to create a JWT JavaScript Web Token inside our auth controller to Authenticate requests and identify our user after a successful login to our API. 
+- Instead of just returning `Ok()`, we'll also return the JWT that can be sent along with the request so that the user doesn't need to keep authenticating themselves. Further, we will be able to identify them in other controllers based on that token to check what functionality a user has access to. Can of course be used in the front end to manage UX.
+- First, create another `private` helper method, to return a string for the token we are going to pass back. 
+- Going to add a `TokenKey` that will be used to sign the tokens we generate (similar to the `PasswordKey` that we appended to the salt when hashing passwords)
+    - in `appsettings.json`, add a `TokenKey` to the `AppSettings`.
+- Need to define some claims that will be attached to the token so we can identify the user and their permissions
+    ```
+    Claim[] claims = new Claim[]{
+        Claim("userId", userId.ToString())
+    }
+    ```
+    Building an array of claims, a claim needs to have a key and a value.
+- Then need to generate the Symmetric key that will be added to the JWT (so our `TokenKey` is our private key).
+- We are using `Microsoft.IdentityModel.Tokens` (y), and passing the Symmetric key a byte array of our token key.
+    ```
+    string? tokenKeyString = _config.GetSection("AppSettings:Token").Value;
+    
+    SymmetricSecurityKey tokenKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(
+                tokenKeyString != null ? tokenKeyString : "" // handling the potential null returned from _config.GetSection()
+            )
+        );
+    ```
+    > The warning comes up because IConfiguration (which "_config" is an instance of) may return a null value in .NET 7 when calling GetSection(). We address that here by assigning it to a nullable string, and then checking if that string is null before we decide whether or not to use it. If the conditional statement "tokenKeyString != null" is true, and tokenKeyString is not null, we take the value between the "?" and the ":", tokenKeyString, if the condition is false, we take the value after the ":", an empty string, as an else value.
+- We then create a `SigningCredential` with the `tokenKey` and `SecurityAlgorithms.HmacSha512Signature` to sign the security token when we create it
+    ```
+    SigningCredentials credentials = new SigningCredentials(tokenKey, 
+                SecurityAlgorithms.HmacSha512Signature);
+    ```
+- We describe the properties of token we want to create by creating a `SecurityTokenDescriptor`, instanciate a `JwtSecurityTokenHandler`, and then create the JWT by passing the handler our descriptor `SecurityToken token = jwtSecurityTokenHandler.CreateToken(descriptor);`
+- Finally, to return this to the client, we need to turn the `token` into a string
+    ```
+    return jwtSecurityTokenHandler.WriteToken(token);
+    ```
+- Hit some oddities passing the Email back to SQL via Dapper - ended up implementing a new method in the DataContext `LoadDataSingleWithParams`:
+    ```
+    public T LoadDataSingleWithParams<T>(string sql, object parameters)
+        {
+            using (IDbConnection dbConnection = new SqlConnection(_config.GetConnectionString("DefaultConnection")))
+            {
+                return dbConnection.QuerySingle<T>(sql, parameters);
+            }
+        }
+    ```
+    - This allows me to pass in a parameter for the e-mail instead of accepting user input into the database, protecting us from SQL injection attacks.
+
+#### Token Validation
+
+
+
+In the following lecture, "JWT Token Validation", we have a similar situation, as we set up out Program.cs file to accept our new token. In order to verify that the signature of the token our user passes back to us matches the signature of the token we issued, we need to provide the same SymmetricSecurityKey to our TokenValidationParameters.
+
+    ```
+    string? tokenKeyString = builder.Configuration.GetSection("AppSettings:Token").Value;
+    
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options => {
+            options.TokenValidationParameters = new TokenValidationParameters() 
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
+                        tokenKeyString != null ? tokenKeyString : ""
+                    )),
+                    ValidateIssuer = false,
+                    ValidateAudience = false
+                };
+            });
+    ```
+
+This code snippet will use the same logic from to ensure that the string returned by GetSection() is not null.
+
+
+
+
 - Refactoring code
 - Relating data to the user (e.g. user and posts)

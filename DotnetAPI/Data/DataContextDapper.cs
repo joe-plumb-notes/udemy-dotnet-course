@@ -24,6 +24,14 @@ namespace DotnetAPI.Data
             return dbConnection.QuerySingle<T>(sql);
         }
 
+        public T LoadDataSingleWithParams<T>(string sql, object parameters)
+        {
+            using (IDbConnection dbConnection = new SqlConnection(_config.GetConnectionString("DefaultConnection")))
+            {
+                return dbConnection.QuerySingle<T>(sql, parameters);
+            }
+        }
+
         public bool ExecuteSql(string sql)
         {
             IDbConnection dbConnection = new SqlConnection(_config.GetConnectionString("DefaultConnection"));
