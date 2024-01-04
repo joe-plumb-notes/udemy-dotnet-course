@@ -1191,29 +1191,56 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
     - This allows me to pass in a parameter for the e-mail instead of accepting user input into the database, protecting us from SQL injection attacks.
 
 #### Token Validation
-
-
-
-In the following lecture, "JWT Token Validation", we have a similar situation, as we set up out Program.cs file to accept our new token. In order to verify that the signature of the token our user passes back to us matches the signature of the token we issued, we need to provide the same SymmetricSecurityKey to our TokenValidationParameters.
-
+- Refresh token logic, and a new endpoint to take an old token and issue a new one.
+- Also going to see how we can access claims from within the token e.g. `userId`.
+- First, need to modify our application to accept the token as a form of authentication. Need to add details into `Program.cs`
+    - Add `app.UseAuthentication();` **NB: make sure this goes BEFORE app.UserAuthorization();**, then add to the buider - will need to add a new package `dotnet add package Microsoft.AspNetCore.Authentication.JwtBearer -v 7.0.14` - this project is on dotnet 7 at the moment so need to specify a compatible version number as it defaults to version 8. Find the most recent compatible version by searching for the package in [`nuget`](https://www.nuget.org/packages/Microsoft.AspNetCore.Authentication.JwtBearer)
     ```
-    string? tokenKeyString = builder.Configuration.GetSection("AppSettings:Token").Value;
-    
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options => {
-            options.TokenValidationParameters = new TokenValidationParameters() 
-                {
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
-                        tokenKeyString != null ? tokenKeyString : ""
+    .AddJwtBearer(options => {
+        options.TokenValidationParameters = new TokenValidationParameters()
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
+                    builder.Configuration.GetSection("AppSettings:TokenKey").Value
                     )),
-                    ValidateIssuer = false,
-                    ValidateAudience = false
-                };
-            });
+                ValidateIssuer = false,
+                ValidateAudience = false
+            };
+    });
     ```
+    - We add the JwtBearer Authentication scheme to the builder, adding authentication services to the application's dependency injection container, and pass in a the `TokenValidationParameters` options. We are passing the same signing key to validate the token's signature that we used to create the signature. We are not validaiting the issuer or audience yet.
+- Now we can change our `AuthController` to accept the token from our user for authentication and and to identify that user.
+- Putting `[Authorize]` decorator on the controller - we can get around this for login and registeration by adding `[AllowAnonymous]`
+- Writing a new function `RefreshToken()`, which checks if userId  tied to the token is valid, and if so, uses that id to create a new token and return to user.
+    ```
+    [HttpGet("refreshtoken")]
+    public string RefreshToken()
+    {
+        // see if user id tied to the token is valid, and if so, use that id to create a new token and return to user
+        string sqlGetUserId = $@"SELECT UserId
+            FROM TutorialAppSchema.Users
+            WHERE [UserId] = @UserId";
 
-This code snippet will use the same logic from to ensure that the string returned by GetSection() is not null.
+        int userId = _dapper.LoadDataSingleWithParams<int>(sqlGetUserId, new Dictionary<string, string>{{ "UserId",  User.FindFirstValue("userId") }});
+        
+        return CreateToken(userId);
+    }
+    ```
+    - I don't like this at all - we're not validating the issuer of the token so if someone were to send in a token with a valid user id, we would then return them a valid token for our application!
+    - To make this secure, we'd need to validate the token being sent for refresh has been signed by our app. We could also implement some kind of grace period whereby we accept tokens for refresh within a certain time window, else we force a new login to validate the authentication.
+- Need to also remember to register our controller with the decorators `[ApiController]` and `[Route("[controller]")]` - without this, Swagger won't pull through example documents from the inbound objects e.g. Dtos for the endpoints. Doing that as put those endpoints behind the `Auth` route.
+
+### Helper classes
+- At the moment we have some noise in our `AuthController` e.g. `GetPasswordHash` and `CreateToken` - we can create helper classes to remove the methods that don't need to be in the controller into a more suitable place (because they are not controller endpoints).
+- New folder in the project `Helpers`, created a new namespace `DotnetAPI.Helpers`, and added our two methods to it as public methods.
+- Created a constructor for the class, passing in our config (as before), and storing this in a `private readonly` field with an `_` before for the naming convention.
+- Then we update the code in the controller:
+    - add the `_authHelper` to the constructor with another `private readonly` field, and replace the old calls to the local method with `_authHelper.GetPasswordHash` and `_authHelper.CreateToken`
+
+
+
+
 
 
 
