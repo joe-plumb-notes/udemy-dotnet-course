@@ -1191,6 +1191,7 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
     - This allows me to pass in a parameter for the e-mail instead of accepting user input into the database, protecting us from SQL injection attacks.
 
 #### Token Validation
+
 - Refresh token logic, and a new endpoint to take an old token and issue a new one.
 - Also going to see how we can access claims from within the token e.g. `userId`.
 - First, need to modify our application to accept the token as a form of authentication. Need to add details into `Program.cs`
@@ -1231,15 +1232,46 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
     - To make this secure, we'd need to validate the token being sent for refresh has been signed by our app. We could also implement some kind of grace period whereby we accept tokens for refresh within a certain time window, else we force a new login to validate the authentication.
 - Need to also remember to register our controller with the decorators `[ApiController]` and `[Route("[controller]")]` - without this, Swagger won't pull through example documents from the inbound objects e.g. Dtos for the endpoints. Doing that as put those endpoints behind the `Auth` route.
 
-### Helper classes
+#### Helper classes
 - At the moment we have some noise in our `AuthController` e.g. `GetPasswordHash` and `CreateToken` - we can create helper classes to remove the methods that don't need to be in the controller into a more suitable place (because they are not controller endpoints).
 - New folder in the project `Helpers`, created a new namespace `DotnetAPI.Helpers`, and added our two methods to it as public methods.
 - Created a constructor for the class, passing in our config (as before), and storing this in a `private readonly` field with an `_` before for the naming convention.
 - Then we update the code in the controller:
     - add the `_authHelper` to the constructor with another `private readonly` field, and replace the old calls to the local method with `_authHelper.GetPasswordHash` and `_authHelper.CreateToken`
 
+### Adding Posts
+- Going to create a peripheral model that we can use to create some data attached to our user.
+- New table, with CCI on (UserId, PostId) to colocate User Posts on disk (as we're mostly going to be querying posts by user)
+    ```
+    CREATE TABLE TutorialAppSchema.Posts (
+    PostId int IDENTITY(1,1),
+    UserId int,
+    PostTitle NVARCHAR(255),
+    PostContent NVARCHAR(MAX),
+    PostCreated DATETIME2,
+    PostUpdated DATETIME2
+    )
+    GO
 
-
+    CREATE CLUSTERED INDEX cix_Posts_UserId_PostId ON TutorialAppSchema.Posts(UserId, PostId)
+    GO
+    ```
+- New model `Posts.cs`
+    ```
+    namespace DotnetAPI.Models
+    {
+        public partial class Posts
+        {
+            public int PostId { get; set; }
+            public int UserId { get; set; }
+            public string PostTitle { get; set; } = "";
+            public string PostContent { get; set; } = "";
+            public DateTime PostCreated { get; set; }
+            public DateTime ?PostUpdated { get; set; }
+        }
+    }
+    ```
+- And [`PostsController.cs`](.\DotnetAPI\Controllers\PostController.cs)
 
 
 
