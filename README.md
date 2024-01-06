@@ -1273,8 +1273,30 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
     ```
 - And [`PostsController.cs`](.\DotnetAPI\Controllers\PostController.cs)
 
-
-
+## Stored Procedures
+- Creating a procedure
+    ```
+    CREATE PROCEDURE TutorialAppSchema.spUsersGet AS
+    /* EXEC TutorialAppSchema.spUsersGet */
+    BEGIN
+        SELECT GETDATE()
+    END
+    ```
+- Alter Procedure
+    ```
+    ALTER PROCEDURE TutorialAppSchema.spUsersGet AS
+    /* EXEC TutorialAppSchema.spUsersGet */
+    BEGIN
+        SELECT [Users].[UserId],
+            [Users].[FirstName],
+            [Users].[LastName],
+            [Users].[Email],
+            [Users].[Gender],
+            [Users].[Active] 
+        FROM TutorialAppSchema.Users AS Users
+    END   
+    ```
+- Parameters
 
 
 - Refactoring code
