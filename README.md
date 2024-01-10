@@ -1284,8 +1284,8 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
     ```
 - Alter Procedure
     ```
-    ALTER PROCEDURE TutorialAppSchema.spUsersGet AS
-    /* EXEC TutorialAppSchema.spUsersGet */
+    ALTER PROCEDURE TutorialAppSchema.spUsers_Get AS
+    /* EXEC TutorialAppSchema.spUsers_Get */
     BEGIN
         SELECT [Users].[UserId],
             [Users].[FirstName],
@@ -1296,7 +1296,31 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
         FROM TutorialAppSchema.Users AS Users
     END   
     ```
-- Parameters
+### Parameters
+- Like an argument.
+    ```
+    ALTER PROCEDURE TutorialAppSchema.spUsers_Get AS
+    /* EXEC TutorialAppSchema.spUsers_Get */
+        @UserId INT
+    BEGIN
+        SELECT [Users].[UserId],
+            [Users].[FirstName],
+            [Users].[LastName],
+            [Users].[Email],
+            [Users].[Gender],
+            [Users].[Active] 
+        FROM TutorialAppSchema.Users AS Users
+        WHERE Users.UserId = @UserId
+    END   
+    
+    ```
+    - Ensure data types match, to prevent SQL from having to implicitly convert data types and impact performance.
+    - Pass in parameter with `EXEC TutorialAppSchema.spUsers_Get @UserId=3`
+    - Put new parameters at the end, and always declare parameters by name, don't rely on order.
+    - Parameters can have default values
+        - `@UserId INT = NULL` would make the parameter nullable, which means we can handle executions where we don't pass in a value. 
+        - `WHERE Users.UserId = @UserId` becomes `WHERE Users.UserId = ISNULL(@UserId, Users.UserId)`. This means we can either get a specific User detail, or all users, from the same SP.
+
 
 
 - Refactoring code
