@@ -1321,7 +1321,155 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
         - `@UserId INT = NULL` would make the parameter nullable, which means we can handle executions where we don't pass in a value. 
         - `WHERE Users.UserId = @UserId` becomes `WHERE Users.UserId = ISNULL(@UserId, Users.UserId)`. This means we can either get a specific User detail, or all users, from the same SP.
 
+### Join and Outer Apply
 
+- First adding joins to other tables
+    ```
+    ALTER PROCEDURE TutorialAppSchema.spUsers_Get AS
+    /* EXEC TutorialAppSchema.spUsers_Get @UserId=3*/
+        @UserId INT
+    BEGIN
+        SELECT [Users].[UserId],
+            [Users].[FirstName],
+            [Users].[LastName],
+            [Users].[Email],
+            [Users].[Gender],
+            [Users].[Active],
+            [UserSalary].[Salary],
+            [UserJobInfo].[Department], 
+            [UserJobInfo].[JobTitle]
+        FROM TutorialAppSchema.Users AS Users
+            LEFT JOIN TutorialAppSchema.UserSalary As UserSalary
+                ON UserSalary.UserId = Users.UserId
+            LEFT JOIN TutorialAppSchema.UserJobInfo As UserJobInfo
+                ON UserJobInfo.UserId = Users.UserId
+            WHERE Users.UserId = @UserId
+    END   
+    ```
+- Now want to add in Average Salary for the department of the selected user, so, CTE (he does an `OUTER APPLY`)
+    ```
+    ALTER PROCEDURE TutorialAppSchema.spUsers_Get
+    /* EXEC TutorialAppSchema.spUsers_Get @UserId=3*/
+    @UserId INT = NULL
+    AS
+    BEGIN
+        WITH cte_AverageDepartmentSalary (Department, AvgDeptSalary) AS 
+        (
+            SELECT [UserJobInfo].[Department],
+                    AVG(UserSalary.Salary) AvgDeptSalary
+            FROM TutorialAppSchema.Users AS Users
+                LEFT JOIN TutorialAppSchema.UserSalary As UserSalary
+                    ON UserSalary.UserId = Users.UserId
+                LEFT JOIN TutorialAppSchema.UserJobInfo As UserJobInfo
+                    ON UserJobInfo.UserId = Users.UserId
+            GROUP BY [UserJobInfo].[Department]
+        ),
+        cte_UserDetails (UserId, FirstName, LastName, Email, Gender, Active, Salary, Department, JobTitle) AS
+        (
+            SELECT [Users].[UserId],
+                [Users].[FirstName],
+                [Users].[LastName],
+                [Users].[Email],
+                [Users].[Gender],
+                [Users].[Active],
+                [UserSalary].[Salary],
+                [UserJobInfo].[Department], 
+                [UserJobInfo].[JobTitle]
+            FROM TutorialAppSchema.Users AS Users
+                LEFT JOIN TutorialAppSchema.UserSalary AS UserSalary
+                    ON UserSalary.UserId = Users.UserId
+                LEFT JOIN TutorialAppSchema.UserJobInfo AS UserJobInfo
+                    ON UserJobInfo.UserId = Users.UserId
+        )
+        SELECT [UserDetails].[UserId],
+                [UserDetails].[FirstName],
+                [UserDetails].[LastName],
+                [UserDetails].[Email],
+                [UserDetails].[Gender],
+                [UserDetails].[Active],
+                [UserDetails].[Salary],
+                [UserDetails].[Department], 
+                [UserDetails].[JobTitle],
+                [AverageDepartmentSalary].[AvgDeptSalary] 
+        FROM cte_UserDetails UserDetails
+            LEFT JOIN cte_AverageDepartmentSalary AverageDepartmentSalary 
+                ON UserDetails.Department = AverageDepartmentSalary.Department
+            WHERE UserDetails.UserId = ISNULL(@UserId, UserDetails.UserId)
+    END           
+    ```
+- I actually missed the nullable param here - this is useful as it means you can get all results, or just one, depending on whether you pass a param or not.
 
-- Refactoring code
-- Relating data to the user (e.g. user and posts)
+### Temp table
+- Here, he replaces his `OUTER APPLY` and instead selects the average department salary results subquery into a temp table. Temp table is good because it materializes the results, so can improve performance (CTEs are not materialized or cached). Would need to work with the query plan and test these different approaches to see how each impacted performance.
+- He also adds a clustered index on the `Department` column on the temp table, as this is the column we are searching on. `CREATE CLUSTERED INDEX cix_AverageDeptSapary_Department ON #AverageDeptSalary(Department)`
+- `DROP TABLE IF EXISTS` isn't in some older versions of MSSQL. If not, we can instead:
+    ```
+    IF OBJECT_ID('tempdb..#AverageDeptSalary', 'U') IS NOT NULL -- the U checks it is a table.
+        BEGIN
+            DROP TABLE #AverageDeptSalary
+        END
+    
+    ```
+- He ends up with a very similar version to the query I did above, but instead of the `cte_AverageDepartmentSalary`, he has a temp table which he then joins to the `UserDetails` sub-query. I can imagine this performs better than joining the two `cte`s together.
+- He also adds an active user param, to enable the sp to support the return of all active/all deactivated/or all users:
+```
+    ALTER PROCEDURE TutorialAppSchema.spUsers_Get
+    /* EXEC TutorialAppSchema.spUsers_Get @UserId=3*/
+    @UserId INT = NULL,
+    @Active BIT = NULL
+    AS
+    BEGIN
+        WITH cte_AverageDepartmentSalary (Department, AvgDeptSalary) AS 
+        (
+            SELECT [UserJobInfo].[Department],
+                    AVG(UserSalary.Salary) AvgDeptSalary
+            FROM TutorialAppSchema.Users AS Users
+                LEFT JOIN TutorialAppSchema.UserSalary As UserSalary
+                    ON UserSalary.UserId = Users.UserId
+                LEFT JOIN TutorialAppSchema.UserJobInfo As UserJobInfo
+                    ON UserJobInfo.UserId = Users.UserId
+            GROUP BY [UserJobInfo].[Department]
+        ),
+        cte_UserDetails (UserId, FirstName, LastName, Email, Gender, Active, Salary, Department, JobTitle) AS
+        (
+            SELECT [Users].[UserId],
+                [Users].[FirstName],
+                [Users].[LastName],
+                [Users].[Email],
+                [Users].[Gender],
+                [Users].[Active],
+                [UserSalary].[Salary],
+                [UserJobInfo].[Department], 
+                [UserJobInfo].[JobTitle]
+            FROM TutorialAppSchema.Users AS Users
+                LEFT JOIN TutorialAppSchema.UserSalary AS UserSalary
+                    ON UserSalary.UserId = Users.UserId
+                LEFT JOIN TutorialAppSchema.UserJobInfo AS UserJobInfo
+                    ON UserJobInfo.UserId = Users.UserId
+        )
+        SELECT [UserDetails].[UserId],
+                [UserDetails].[FirstName],
+                [UserDetails].[LastName],
+                [UserDetails].[Email],
+                [UserDetails].[Gender],
+                [UserDetails].[Active],
+                [UserDetails].[Salary],
+                [UserDetails].[Department], 
+                [UserDetails].[JobTitle],
+                [AverageDepartmentSalary].[AvgDeptSalary] 
+        FROM cte_UserDetails UserDetails
+            LEFT JOIN cte_AverageDepartmentSalary AverageDepartmentSalary 
+                ON UserDetails.Department = AverageDepartmentSalary.Department
+            WHERE UserDetails.UserId = ISNULL(@UserId, UserDetails.UserId)
+                AND UserDetails.Active = ISNULL(@Active, UserDetails.Active)
+    END           
+    ```
+- Talks through the fact that this ISNULL check doesn't work for nullable fields - for the above example, we know `Active` and `UserId` are not nullable. If you compare a null value to null, it won't return any results:
+    `SELECT CASE WHERE NULL = NULL THEN 1 ELSE 0 END, CASE WHERE NULL <> NULL THEN 1 ELSE 0 END`
+- This returns two 0's.
+- The solution is to: 
+    - Treat the inbound column with `ISNULL`, to replace NULL values, and 
+    - Use `COALESCE` to treat the column you're joining to based on the parameter
+        `AND ISNULL(UserDetails.Active, 0) = COALESCE(@Active, UserDetails.Active, 0)`
+
+### User Upsert with Stored Procedures
