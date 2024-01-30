@@ -1412,7 +1412,7 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
     ```
 - He ends up with a very similar version to the query I did above, but instead of the `cte_AverageDepartmentSalary`, he has a temp table which he then joins to the `UserDetails` sub-query. I can imagine this performs better than joining the two `cte`s together.
 - He also adds an active user param, to enable the sp to support the return of all active/all deactivated/or all users:
-```
+    ```
     ALTER PROCEDURE TutorialAppSchema.spUsers_Get
     /* EXEC TutorialAppSchema.spUsers_Get @UserId=3*/
     @UserId INT = NULL,
@@ -1473,3 +1473,411 @@ My notes from the udemy course https://www.udemy.com/course/net-core-with-ms-sql
         `AND ISNULL(UserDetails.Active, 0) = COALESCE(@Active, UserDetails.Active, 0)`
 
 ### User Upsert with Stored Procedures
+
+- Adding multiple records across different tables with the SP
+- Parameter per column to construct the row.
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spUser_Upsert
+        @FirstName NVARCHAR(50),
+        @LastName NVARCHAR(50), 
+        @Email NVARCHAR(50), 
+        @Gender NVARCHAR(50),
+        @Active BIT = 1,
+        @UserId INT = NULL
+    AS
+    BEGIN
+        IF NOT EXISTS (SELECT UserId FROM TutorialAppSchema.Users WHERE UserId = @UserId)
+            BEGIN
+            IF NOT EXISTS (SELECT UserId FROM TutorialAppSchema.Users WHERE Email = @Email)
+                BEGIN
+                    INSERT INTO TutorialAppSchema.Users (
+                        FirstName,
+                        LastName,
+                        Email,
+                        Gender,
+                        Active
+                        )
+                    VALUES
+                        (@FirstName, 
+                        @LastName,
+                        @Email,
+                        @Gender,
+                    @Active)
+                END
+            END
+        ELSE
+            BEGIN
+                UPDATE TutorialAppSchema.Users SET
+                    FirstName = @FirstName,
+                    LastName = @LastName,
+                    Email = @Email,
+                    Gender = @Gender,
+                    Active = @Active
+                WHERE UserId = @UserId
+            END
+    END
+    ```
+- Now adding salary and job info details at the same time as to upsert to user details.
+- `DECLARE`ing a variable in the INSERT block to get the UserId:
+    - `DECLARE @OutputUserId INT` .. `SET @OutputUserId = @@IDENTITY`
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spUser_Upsert
+        @FirstName NVARCHAR(50),
+        @LastName NVARCHAR(50), 
+        @Email NVARCHAR(50), 
+        @Gender NVARCHAR(50),
+        @JobTitle NVARCHAR(50),
+        @Department NVARCHAR(50),
+        @Salary DECIMAL(18,4),
+        @Active BIT = 1,
+        @UserId INT = NULL
+    AS
+    BEGIN
+        IF NOT EXISTS (SELECT UserId FROM TutorialAppSchema.Users WHERE UserId = @UserId)
+            BEGIN
+            IF NOT EXISTS (SELECT UserId FROM TutorialAppSchema.Users WHERE Email = @Email)
+                BEGIN
+                    DECLARE @OutputUserId INT
+                    INSERT INTO TutorialAppSchema.Users (
+                        FirstName,
+                        LastName,
+                        Email,
+                        Gender,
+                        Active
+                        )
+                    VALUES
+                        (@FirstName, 
+                        @LastName,
+                        @Email,
+                        @Gender,
+                    @Active)
+
+                    SET @OutputUserId = @@IDENTITY
+
+                    INSERT INTO TutorialAppSchema.UserSalary (
+                        UserId,
+                        Salary
+                    ) VALUES (
+                        @OutputUserId, 
+                        @Salary
+                    )
+
+                    INSERT INTO TutorialAppSchema.UserJobInfo (
+                        UserId,
+                        Department,
+                        JobTitle
+                    ) VALUES (
+                        @OutputUserId, 
+                        @Department,
+                        @JobTitle
+                    )
+                END
+            END
+        ELSE
+            BEGIN
+                UPDATE TutorialAppSchema.Users SET
+                    FirstName = @FirstName,
+                    LastName = @LastName,
+                    Email = @Email,
+                    Gender = @Gender,
+                    Active = @Active
+                WHERE UserId = @UserId
+
+                UPDATE TutorialAppSchema.UserSalary
+                    SET Salary = @Salary
+                    WHERE UserId = @OutputUserId
+
+                UPDATE TutorialAppSchema.UserJobInfo
+                    SET Department = @Department,
+                        JobTitle = @JobTitle
+                    WHERE UserId = @OutputUserId
+            END
+    END
+    ```
+- Adding `DELETE` proc
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spUser_Delete
+        @UserId INT
+    AS
+    BEGIN
+        DELETE FROM TutorialAppSchema.Users 
+            WHERE UserId = @UserId
+        
+        DELETE FROM TutorialAppSchema.UserSalary 
+            WHERE UserId = @UserId
+        
+        DELETE FROM TutorialAppSchema.UserJobInfo 
+            WHERE UserId = @UserId
+    END
+    ```
+
+### Procs to manage Posts
+- Building similar SPs, to `GET` posts
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spPosts_Get
+    /* EXEC TutorialAppSchema.spPosts_Get @UserId=1007, @SearchValue='first'*/
+    /* EXEC TutorialAppSchema.spPosts_Get @PostId=3 */
+        @UserId INT = NULL,
+        @SearchValue NVARCHAR(MAX) = NULL,
+        @PostId INT = NULL
+    AS
+    BEGIN
+        SELECT [Posts].[PostId],
+            [Posts].[UserId],
+            [Posts].[PostTitle],
+            [Posts].[PostContent],
+            [Posts].[PostCreated],
+            [Posts].[PostUpdated] 
+        FROM TutorialAppSchema.Posts As Posts
+            WHERE Posts.UserId = ISNULL(@UserId, Posts.UserId)
+                AND Posts.PostId = ISNULL(@PostId, Posts.PostId)
+                AND (@SearchValue IS NULL
+                    OR Posts.PostContent LIKE '%' + @SearchValue + '%'
+                    OR Posts.PostTitle LIKE '%' + @SearchValue + '%')
+    END
+    ```
+- Upsert posts
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spPosts_Upsert
+    /* EXEC TutorialAppSchema.spPosts_Get @UserId=1007, @SearchValue='first'*/
+    /* EXEC TutorialAppSchema.spPosts_Get @PostId=3 */
+        @UserId INT,
+        @PostTitle NVARCHAR(255),
+        @PostContent NVARCHAR(MAX),
+        @PostId INT = NULL
+    AS
+    BEGIN
+        IF NOT EXISTS (SELECT * FROM TutorialAppSchema.Posts WHERE Posts.PostId = @PostId)
+            BEGIN
+                INSERT INTO TutorialAppSchema.Posts (
+                [Posts].[UserId],
+                [Posts].[PostTitle],
+                [Posts].[PostContent],
+                [Posts].[PostCreated],
+                [Posts].[PostUpdated]
+                ) VALUES (
+                    @UserId, 
+                    @PostTitle,
+                    @PostContent, 
+                    GETDATE(),
+                    GETDATE()
+                )
+            END
+        ELSE 
+            BEGIN
+                UPDATE TutorialAppSchema.Posts
+                    SET PostTitle = @PostTitle, 
+                        PostContent = @PostContent,
+                        PostUpdated = GETDATE() 
+                    WHERE PostId = @PostId
+            END
+    END
+    ```
+- Delete posts - user check to ensure users who authored the posts can delete that data
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spPosts_Delete
+        @PostId INT,
+        @UserId INT 
+    AS
+    BEGIN
+        DELETE FROM TutorialAppSchema.Posts 
+            WHERE PostId = @PostId
+                AND UserId = @UserId
+    END
+    ```
+### Registration SP, to register and update the user passwords
+- i.e. registration upsert proc
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spRegistration_Upsert
+        @Email NVARCHAR(50),
+        @PasswordHash VARBINARY(MAX),
+        @PasswordSalt VARBINARY(MAX)
+    AS
+    BEGIN
+        IF NOT EXISTS (SELECT * FROM TutorialAppSchema.Auth WHERE Email = @Email)
+            BEGIN
+                INSERT INTO TutorialAppSchema.Auth(
+                    [Email],
+                    [PasswordHash],
+                    [PasswordSalt]
+                ) VALUES (
+                    @Email,
+                    @PasswordHash,
+                    @PasswordSalt
+                )
+            END
+        ELSE
+            BEGIN
+                UPDATE TutorialAppSchema.Auth 
+                    SET PasswordHash = @PasswordHash,
+                        PasswordSalt = @PasswordSalt
+                WHERE Email = @Email
+            END
+    END
+    ```
+- And one to get the password salt and hash from the database to confirm login:
+    ```
+    CREATE OR ALTER PROCEDURE TutorialAppSchema.spLoginConfirmation_Get
+        @Email NVARCHAR(50)
+    AS
+    BEGIN
+        SELECT 
+            [Auth].[PasswordHash],
+            [Auth].[PasswordSalt] 
+        FROM TutorialAppSchema.Auth AS Auth
+            WHERE Auth.Email = @Email
+    END
+    ```
+## API Advanced
+- Integrate the API endpoints in the application with the SPs
+- Consolidate the endpoints that won't be needed when using SPs
+- Update password
+- Changing SQL parameter use to more secure way
+- Refactoring, to make dynamic endpoints
+
+### UserComplete Setup and Get
+- Adding SPs into the controllers in the API project. Starting with `UserController.cs`
+- Requirements evolved, and our SPs are returning additional data that we don't yet have in our models, so we'll need to fix that. Going to create a new model that we can use to pull the data back using the `TutorialAppSchema.spUsers_Get` SP. We're calling the model `UserComplete` - the user model along with fields from job info and salary.
+- Made a copy of `UserController`, `UserCompleteController`, and still using dapper, we're repacing the SQL queries with EXECs for the SP, and using our new `UserComplete` model
+- He is using a route parameter instead of the string parameter here - I think he'll change this before the end of this section, when he starts bringing all the APIs together on the same routes.
+- He's really going out of his way to not use parameters. Lots of cumbersome string processing to construct a valid SQL string. I've done:
+    ```
+    [HttpGet]
+    public ActionResult<IEnumerable<UserComplete>> GetUsers(int? userId = null, bool? isActive = null)
+    {
+        if (userId == null && isActive == null)
+        {
+            _logger.LogInformation("Users endpoint processed a request at " + DateTime.Now + ". Getting all users from the db..");
+
+            string query = @"EXEC TutorialAppSchema.spUsers_Get";
+
+            IEnumerable<UserComplete> users = _dapper.LoadData<UserComplete>(query);
+            return Ok(users);
+        }
+
+        else
+        {
+            _logger.LogInformation("User endpoint processed a request at " + DateTime.Now + ". User Id " + userId + " was passed. Getting User Details from db..");
+
+            string query = @"EXEC TutorialAppSchema.spUsers_Get @UserId, @Active;";
+            
+            var parametersDict = new Dictionary<string, object>
+            {
+                {"UserId", userId},
+                {"Active", isActive}
+            };
+
+            var sqlParameters = new DynamicParameters(parametersDict);
+
+            var user = _dapper.LoadDataWithParams<UserComplete>(query, sqlParameters);
+            if (user == null)
+            {
+                return NotFound();
+            }
+            return Ok(new List<IEnumerable<UserComplete>> { user });
+        }
+    }
+    ```
+    We can probably do away with the conditional calls too. 
+- Spotted the above was unnecessarily returning a nested array - removed this, so we now just `return Ok( user );`. Nice thing about this is we can make changes to how the data is returned from the DB, without redeploying the app. e.g. I can round avgDeptSalary to 2 dp by editing the sql in the backend
+    ```
+    [
+        {
+        "userId": 4,
+        "firstName": "Bordie",
+        "lastName": "Rodda",
+        "email": "brodda3@columbia.edu",
+        "gender": "Female",
+        "active": true,
+        "jobTitle": "Financial Advisor",
+        "department": "Product Management",
+        "salary": 188517.96,
+        "avgDeptSalary": 135722.429861
+        }
+    ]
+    ```
+    becomes
+    ```
+    [
+        {
+            "userId": 4,
+            "firstName": "Bordie",
+            "lastName": "Rodda",
+            "email": "brodda3@columbia.edu",
+            "gender": "Female",
+            "active": true,
+            "jobTitle": "Financial Advisor",
+            "department": "Product Management",
+            "salary": 188517.96,
+            "avgDeptSalary": 135722.43
+        }
+    ]
+    ```
+
+### UserComplete Upsert and Delete, Posts APIs
+
+- Just use the SPs. Copy the params over, remove the where clause, and done. Easy!
+    ```
+    [HttpPut]
+    public IActionResult UpsertUser(UserComplete user)
+    {
+        _logger.LogInformation("User endpoint processed a request at " + DateTime.Now + ". User Id " + user.UserId + " was passed. Updating User Details from db..");
+
+        string query = @"EXEC TutorialAppSchema.spUser_Upsert 
+                @FirstName = '" + user.FirstName + @"'
+                , @LastName = '" + user.LastName + @"'
+                , @Email = '"+ user.Email +@"'
+                , @Gender = '"+user.Gender+@"'
+                , @Active = '"+user.Active+@"' 
+                , @JobTitle = '"+user.JobTitle+@"' 
+                , @Department = '"+user.Department+@"' 
+                , @Salary = '"+user.Salary+@"' 
+                , @UserId = " + user.UserId + ";";
+
+        _logger.LogInformation("SQL to be executed on DB: "+ query);
+        if (_dapper.ExecuteSql(query))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to update user");
+    }
+    ```
+- Migrated most of the other API calls to use the SPs that we authored in the previous module. Easy to do. 
+
+### Reset password endpoint
+- Re-factoring the `Registration` endpoint so that we have the functionality to upsert password in a separate method, which means we can call it from the existing registration as well as a reset password functionality.
+- Moved the logic to set a password into a method in our `AuthHelper.cs`, `SetPassword`, and then use this in the reset registration method, as well as a new `ResetPassword` function on the `AuthController`
+    ```
+    // Update password
+    [HttpPut("ResetPassword")]
+    public IActionResult ResetPassword(UserForLoginDto userForSetPassword)
+    {
+        if (_authHelper.SetPassword(userForSetPassword))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to update password!");
+    }
+    ```
+- He's getting round to the parameter bits now, and showing the difference between `SqlParameter` and `DynamicParameters()`, and how to construct them. Looks like we don't need to use `SqlParameter`s, and can actually use Dynamic params instead. Were just implementing those as a reference. Updated all the SqlParams to Dynamic params, much easier and tidier to construct. Not an exact mapping on the names of the `DbType`s but pretty self explanatory.
+- He's now tidying it all up, removing Dtos that we're no longer using etc. I'm going to leave bits in as a reference.
+
+- Did a nice bit of refactoring of the `UpsertUser` method that we use in `Auth` and `UserComplete`, moved this into a separate Helper class `ReusableSql`. Also a nice opportunity to use Automapper again. Set it up in the constructor of the controller:
+    ```
+    _mapper = new Mapper(new MapperConfiguration(cfg => 
+    {
+        cfg.CreateMap<UserForRegistrationDto, UserComplete>();
+    }));
+    ```
+    And map from one object to the other:
+    `UserComplete userComplete = _mapper.Map<UserComplete>(userForRegistration);`
+- Tidy.
+
+## Deploying to Azure
+- Build the app with `dotnet build --configuration Release`. Release configuration is used for the final, optimized version of your application that you'll distribute to users. It optimizes your code for performance and excludes debug symbols from the output files.
+- `az webapp up --sku F1 --name "globallyuniquename" --os-type linux` 
+- Creates a new controller `test` with the Test Connection from `UserComplete` and a simple `test` endpoint that returns a string, to check the webapp deploys successfully. 
+
+# Finished!
+
+- [My certificate](http://ude.my/UC-fd78acd1-5bef-469f-b1c5-0fabf81c5d09)

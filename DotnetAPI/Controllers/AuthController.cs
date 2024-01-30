@@ -1,16 +1,11 @@
-using System.Data;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
+using AutoMapper;
 using DotnetAPI.Data;
 using DotnetAPI.Dtos;
 using DotnetAPI.Helpers;
+using DotnetAPI.Models;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
-using Microsoft.IdentityModel.Tokens;
 
 namespace DotnetAPI.Controllers
 {
@@ -21,10 +16,17 @@ namespace DotnetAPI.Controllers
     {
         private readonly DataContextDapper _dapper;
         private readonly AuthHelper _authHelper;
+        private readonly ReusableSql _reusableSql;
+        private readonly IMapper _mapper;
         public AuthController(IConfiguration config)
         {
             _dapper = new DataContextDapper(config);
             _authHelper = new AuthHelper(config);
+            _reusableSql = new ReusableSql(config);
+            _mapper = new Mapper(new MapperConfiguration(cfg => 
+                {
+                    cfg.CreateMap<UserForRegistrationDto, UserComplete>();
+                }));
         }
 
         // Register user
@@ -41,54 +43,16 @@ namespace DotnetAPI.Controllers
                 IEnumerable<string> existingUsers = _dapper.LoadData<string>(query);
                 if (existingUsers.Count() == 0)
                 {
-                    byte[] passwordSalt = new byte[128/8];
-                    using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
-                    {
-                        rng.GetNonZeroBytes(passwordSalt);
-                    }
-
-                    byte[] passwordHash = _authHelper.GetPasswordHash(userForRegistration.Password, passwordSalt);
-                    
-                    // SQL query with parameters for the hash and salt
-                    string sqlAddAuth = $@"INSERT INTO TutorialAppSchema.Auth
-                    ([Email],
-                    [PasswordHash],
-                    [PasswordSalt]) VALUES
-                    ('{ userForRegistration.Email }', @PasswordHash, @PasswordSalt);";
-
-                    // Create list of SQL parameters to pass in with query
-                    List<SqlParameter> sqlParameters = new List<SqlParameter>();
-                    SqlParameter passwordHashParameter = new SqlParameter("@PasswordHash", SqlDbType.VarBinary)
-                    {
-                        Value = passwordHash
+                    UserForLoginDto userForSetPassword = new UserForLoginDto(){
+                        Email = userForRegistration.Email,
+                        Password = userForRegistration.Password
                     };
-                    SqlParameter passwordSaltParameter = new SqlParameter("@PasswordSalt", SqlDbType.VarBinary)
+                    if (_authHelper.SetPassword(userForSetPassword))
                     {
-                        Value = passwordSalt
-                    };
-                    // sqlParameters.Add(passwordHashParameter);
-                    // sqlParameters.Add(passwordSaltParameter);
-                    sqlParameters.AddRange(new[] { passwordHashParameter, passwordSaltParameter });
-
-                    if (_dapper.ExecuteSqlWithParameters(sqlAddAuth, sqlParameters))
-                    {
-                        string sqlAddUserFromRegistration = @"
-                            INSERT INTO TutorialAppSchema.Users (
-                                    [FirstName]
-                                    , [LastName]
-                                    , [Email]
-                                    , [Gender]
-                                    , [Active])
-                                VALUES
-                                    (
-                                        '" + userForRegistration.FirstName + @"',
-                                        '" + userForRegistration.LastName + @"',
-                                        '" + userForRegistration.Email + @"',
-                                        '" + userForRegistration.Gender + @"',
-                                        1
-                                    )  
-                                    ;";
-                        if (_dapper.ExecuteSql(sqlAddUserFromRegistration))
+                        UserComplete userComplete = _mapper.Map<UserComplete>(userForRegistration);
+                        userComplete.Active = true;
+                           
+                        if (_reusableSql.UpsertUser(userComplete))
                         {
                             return Ok();
                         }
@@ -101,15 +65,24 @@ namespace DotnetAPI.Controllers
             throw new Exception("Passwords do not match");
         }
 
+        // Update password
+        [HttpPut("ResetPassword")]
+        public IActionResult ResetPassword(UserForLoginDto userForSetPassword)
+        {
+            if (_authHelper.SetPassword(userForSetPassword))
+            {
+                return Ok();
+            }
+            throw new Exception("Failed to update password!");
+        }
+
         // Login
         [AllowAnonymous]
         [HttpPost("login")]
         public IActionResult Login(UserForLoginDto userForLogin)
         {
             // Get passwordhash and passwordsalt from db
-            string sqlForHashAndSalt = @"SELECT [PasswordHash], [PasswordSalt]
-                FROM TutorialAppSchema.Auth
-                WHERE [Email] = @Email";
+            string sqlForHashAndSalt = @"EXEC TutorialAppSchema.spLoginConfirmation_Get @Email";
             
             UserForLoginConfirmationDto userForLoginConfirmation;
 
@@ -148,7 +121,7 @@ namespace DotnetAPI.Controllers
         public string RefreshToken()
         {
             // see if user id tied to the token is valid, and if so, use that id to create a new token and return to user
-            string sqlGetUserId = $@"SELECT UserId
+            string sqlGetUserId = @"SELECT UserId
                 FROM TutorialAppSchema.Users
                 WHERE [UserId] = @UserId";
 

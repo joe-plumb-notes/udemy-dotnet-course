@@ -49,17 +49,11 @@ namespace DotnetAPI.Data
             return dbConnection.Execute(sql);
         }
 
-        public bool ExecuteSqlWithParameters(string sql, List<SqlParameter> parameters)
+        public bool ExecuteSqlWithParameters(string sql, DynamicParameters parameters)
         {
             using (IDbConnection dbConnection = new SqlConnection(_config.GetConnectionString("DefaultConnection")))
             {
-                var dapperParameters = new DynamicParameters();
-                foreach (var parameter in parameters)
-                {
-                    dapperParameters.Add(parameter.ParameterName, parameter.Value);
-                }
-
-                return dbConnection.Execute(sql, dapperParameters) > 0;
+                return dbConnection.Execute(sql, parameters) > 0;
             }
         }
     }
